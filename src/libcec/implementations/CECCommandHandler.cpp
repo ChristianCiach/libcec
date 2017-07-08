@@ -798,7 +798,7 @@ int CCECCommandHandler::HandleUserControlRelease(const cec_command &command)
 
   CECClientPtr client = m_processor->GetClient(command.destination);
   if (client)
-    client->AddKey(false, true);
+    client->AddKey();
 
   return COMMAND_HANDLED;
 }

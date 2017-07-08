@@ -39,8 +39,6 @@
 #include "CECTypeUtils.h"
 #include <memory>
 
-#define CEC_PROCESSOR_SIGNAL_WAIT_TIME 1000
-
 namespace CEC
 {
   class CAdapterCommunication;
@@ -134,7 +132,7 @@ namespace CEC
 
       void AddLog(const cec_log_level level, const char *strFormat, ...);
       void AddCommand(const cec_command &command);
-      uint16_t CheckKeypressTimeout(void);
+      void CheckKeypressTimeout(void);
       void Alert(const libcec_alert type, const libcec_parameter &param);
 
       static bool IsValidPhysicalAddress(uint16_t iPhysicalAddress);

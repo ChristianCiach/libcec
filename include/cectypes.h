@@ -1464,8 +1464,6 @@ struct libcec_configuration
   cec_adapter_type      adapterType;          /*!< type of the CEC adapter that we're connected to. added in 1.8.2 */
   cec_user_control_code comboKey;             /*!< key code that initiates combo keys. defaults to CEC_USER_CONTROL_CODE_F1_BLUE. CEC_USER_CONTROL_CODE_UNKNOWN to disable. added in 2.0.5 */
   uint32_t              iComboKeyTimeoutMs;   /*!< timeout until the combo key is sent as normal keypress */
-  uint32_t              iButtonRepeatRateMs;  /*!< rate at which buttons autorepeat. 0 means rely on CEC device */
-  uint32_t              iButtonReleaseDelayMs;/*!< duration after last update until a button is considered released */
   uint32_t              iDoubleTapTimeoutMs;  /*!< prevent double taps within this timeout. defaults to 200ms. added in 4.0.0 */
   uint8_t               bAutoWakeAVR;         /*!< set to 1 to automatically waking an AVR when the source is activated. added in 4.0.0 */
 
@@ -1497,8 +1495,6 @@ struct libcec_configuration
                  cecVersion                == other.cecVersion &&
                  adapterType               == other.adapterType &&
                  iDoubleTapTimeoutMs       == other.iDoubleTapTimeoutMs &&
-                 iButtonRepeatRateMs       == other.iButtonRepeatRateMs &&
-                 iButtonReleaseDelayMs     == other.iButtonReleaseDelayMs &&
                  comboKey                  == other.comboKey &&
                  iComboKeyTimeoutMs        == other.iComboKeyTimeoutMs &&
                  bAutoWakeAVR              == other.bAutoWakeAVR);
@@ -1533,8 +1529,6 @@ struct libcec_configuration
     iDoubleTapTimeoutMs =             CEC_DOUBLE_TAP_TIMEOUT_MS;
     comboKey =                        CEC_USER_CONTROL_CODE_STOP;
     iComboKeyTimeoutMs =              CEC_DEFAULT_COMBO_TIMEOUT_MS;
-    iButtonRepeatRateMs =             0;
-    iButtonReleaseDelayMs =           CEC_BUTTON_TIMEOUT;
     bAutoWakeAVR =                    0;
 
     memset(strDeviceName, 0, 13);

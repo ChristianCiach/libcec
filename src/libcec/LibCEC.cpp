@@ -351,17 +351,11 @@ bool CLibCEC::IsValidPhysicalAddress(uint16_t iPhysicalAddress)
          iPhysicalAddress <= CEC_MAX_PHYSICAL_ADDRESS;
 }
 
-uint16_t CLibCEC::CheckKeypressTimeout(void)
+void CLibCEC::CheckKeypressTimeout(void)
 {
-  uint16_t timeout = CEC_PROCESSOR_SIGNAL_WAIT_TIME;
   // check all clients
   for (std::vector<CECClientPtr>::iterator it = m_clients.begin(); it != m_clients.end(); it++)
-  {
-    uint16_t t = (*it)->CheckKeypressTimeout();
-    if (t < timeout)
-      timeout = t;
-  }
-  return timeout;
+    (*it)->CheckKeypressTimeout();
 }
 
 void CLibCEC::AddLog(const cec_log_level level, const char *strFormat, ...)

@@ -54,14 +54,12 @@ CCECClient::CCECClient(CCECProcessor *processor, const libcec_configuration &con
     m_bInitialised(false),
     m_bRegistered(false),
     m_iCurrentButton(CEC_USER_CONTROL_CODE_UNKNOWN),
-    m_initialButtontime(0),
-    m_updateButtontime(0),
-    m_repeatButtontime(0),
-    m_releaseButtontime(0),
-    m_pressedButtoncount(0),
-    m_releasedButtoncount(0),
-    m_iPreventForwardingPowerOffCommand(0)
+    m_buttontime(0),
+    m_iPreventForwardingPowerOffCommand(0),
+    m_iLastKeypressTime(0)
 {
+  m_lastKeypress.keycode = CEC_USER_CONTROL_CODE_UNKNOWN;
+  m_lastKeypress.duration = 0;
   m_configuration.Clear();
   // set the initial configuration
   SetConfiguration(configuration);
@@ -865,9 +863,6 @@ bool CCECClient::GetCurrentConfiguration(libcec_configuration &configuration)
   configuration.bMonitorOnly              = m_configuration.bMonitorOnly;
   configuration.cecVersion                = m_configuration.cecVersion;
   configuration.adapterType               = m_configuration.adapterType;
-  configuration.iDoubleTapTimeoutMs       = m_configuration.iDoubleTapTimeoutMs;
-  configuration.iButtonRepeatRateMs       = m_configuration.iButtonRepeatRateMs;
-  configuration.iButtonReleaseDelayMs     = m_configuration.iButtonReleaseDelayMs;
   configuration.bAutoWakeAVR              = m_configuration.bAutoWakeAVR;
 
   return true;
@@ -909,8 +904,6 @@ bool CCECClient::SetConfiguration(const libcec_configuration &configuration)
     m_configuration.deviceTypes.Add(configuration.deviceTypes[0]);
     m_configuration.comboKey                   = configuration.comboKey;
     m_configuration.iComboKeyTimeoutMs         = configuration.iComboKeyTimeoutMs;
-    m_configuration.iButtonRepeatRateMs        = configuration.iButtonRepeatRateMs;
-    m_configuration.iButtonReleaseDelayMs      = configuration.iButtonReleaseDelayMs;
     m_configuration.bAutoWakeAVR               = configuration.bAutoWakeAVR;
   }
 
@@ -951,7 +944,6 @@ bool CCECClient::SetConfiguration(const libcec_configuration &configuration)
     primary->ActivateSource();
   }
 
-  LIB_CEC->AddLog(CEC_LOG_DEBUG, "%s: %d:%d:%d", __FUNCTION__, DoubleTapTimeoutMS(), m_configuration.iButtonRepeatRateMs, m_configuration.iButtonReleaseDelayMs);
   return true;
 }
 
@@ -975,7 +967,7 @@ void CCECClient::AddCommand(const cec_command &command)
   }
 }
 
-void CCECClient::AddKey(bool bSendComboKey /* = false */, bool bButtonRelease /* = false */)
+void CCECClient::AddKey(bool bSendComboKey /* = false */)
 {
   cec_keypress key;
   key.keycode = CEC_USER_CONTROL_CODE_UNKNOWN;
@@ -984,10 +976,8 @@ void CCECClient::AddKey(bool bSendComboKey /* = false */, bool bButtonRelease /*
     CLockObject lock(m_mutex);
     if (m_iCurrentButton != CEC_USER_CONTROL_CODE_UNKNOWN)
     {
-      unsigned int duration = (unsigned int) (GetTimeMs() - m_updateButtontime);
-      key.duration = (unsigned int) (GetTimeMs() - m_initialButtontime);
-
-      if (duration > m_configuration.iComboKeyTimeoutMs ||
+      key.duration = (unsigned int) (GetTimeMs() - m_buttontime);
+      if (key.duration > m_configuration.iComboKeyTimeoutMs ||
           m_configuration.iComboKeyTimeoutMs == 0 ||
           m_iCurrentButton != m_configuration.comboKey ||
           bSendComboKey)
@@ -995,23 +985,13 @@ void CCECClient::AddKey(bool bSendComboKey /* = false */, bool bButtonRelease /*
         key.keycode = m_iCurrentButton;
 
         m_iCurrentButton = CEC_USER_CONTROL_CODE_UNKNOWN;
-        m_initialButtontime = 0;
-        m_updateButtontime = 0;
-        m_repeatButtontime = 0;
-        m_releaseButtontime = 0;
-        m_pressedButtoncount = 0;
-        m_releasedButtoncount = 0;
       }
     }
   }
 
-  // we don't forward releases when supporting repeating keys
-  if (bButtonRelease && m_configuration.iButtonRepeatRateMs)
-    return;
-
   if (key.keycode != CEC_USER_CONTROL_CODE_UNKNOWN)
   {
-    LIB_CEC->AddLog(CEC_LOG_DEBUG, "key released: %s (%1x) D:%dms", ToString(key.keycode), key.keycode, key.duration);
+    LIB_CEC->AddLog(CEC_LOG_DEBUG, "key released: %s (%1x)", ToString(key.keycode), key.keycode);
     QueueAddKey(key);
   }
 }
@@ -1022,11 +1002,9 @@ void CCECClient::AddKey(const cec_keypress &key)
       key.keycode < CEC_USER_CONTROL_CODE_SELECT)
   {
     // send back the previous key if there is one
-    LIB_CEC->AddLog(CEC_LOG_DEBUG, "Unexpected key %s (%1x) D:%dms", ToString(key.keycode), key.keycode, key.duration);
     AddKey();
     return;
   }
-  bool isrepeat = false;
   cec_keypress transmitKey(key);
   cec_user_control_code comboKey(m_configuration.comboKey);
 
@@ -1045,62 +1023,27 @@ void CCECClient::AddKey(const cec_keypress &key)
         transmitKey.keycode = CEC_USER_CONTROL_CODE_DOT;
       // default, send back the previous key
       else
-      {
-        LIB_CEC->AddLog(CEC_LOG_DEBUG, "Combo key %s (%1x) D%dms:", ToString(key.keycode), key.keycode, key.duration);
         AddKey(true);
-      }
     }
-
-    LIB_CEC->AddLog(CEC_LOG_DEBUG, "key pressed: %s (%1x) current(%lx) duration(%d)", ToString(transmitKey.keycode), transmitKey.keycode, m_iCurrentButton, key.duration);
 
     if (m_iCurrentButton == key.keycode)
     {
-      m_updateButtontime = GetTimeMs();
-      m_releaseButtontime = m_updateButtontime + (m_configuration.iButtonReleaseDelayMs ? m_configuration.iButtonReleaseDelayMs : CEC_BUTTON_TIMEOUT);
-      // want to have seen some updated before considering a repeat
-      if (m_configuration.iButtonRepeatRateMs)
-      {
-        if (!m_repeatButtontime && m_pressedButtoncount > 1)
-          m_repeatButtontime = m_initialButtontime + DoubleTapTimeoutMS();
-        isrepeat = true;
-      }
-      m_pressedButtoncount++;
+      m_buttontime = GetTimeMs();
     }
     else
     {
-      if (m_iCurrentButton != transmitKey.keycode)
-      {
-        LIB_CEC->AddLog(CEC_LOG_DEBUG, "Changed key %s (%1x) D:%dms cur:%lx", ToString(transmitKey.keycode), transmitKey.keycode, transmitKey.duration, m_iCurrentButton);
-        AddKey();
-      }
+      AddKey();
       if (key.duration == 0)
       {
         m_iCurrentButton = transmitKey.keycode;
-        if (m_iCurrentButton == CEC_USER_CONTROL_CODE_UNKNOWN)
-        {
-          m_initialButtontime = 0;
-          m_updateButtontime = 0;
-          m_repeatButtontime = 0;
-          m_releaseButtontime = 0;
-          m_pressedButtoncount = 0;
-          m_releasedButtoncount = 0;
-        }
-        else
-        {
-          m_initialButtontime = GetTimeMs();
-          m_updateButtontime = m_initialButtontime;
-          m_repeatButtontime = 0; // set this on next update
-          m_releaseButtontime = m_initialButtontime + (m_configuration.iButtonReleaseDelayMs ? m_configuration.iButtonReleaseDelayMs : CEC_BUTTON_TIMEOUT);
-          m_pressedButtoncount = 1;
-          m_releasedButtoncount = 0;
-        }
+        m_buttontime = m_iCurrentButton == CEC_USER_CONTROL_CODE_UNKNOWN || key.duration > 0 ? 0 : GetTimeMs();
       }
     }
   }
 
-  if (!isrepeat && (key.keycode != comboKey || key.duration > 0))
+  if (key.keycode != comboKey || key.duration > 0)
   {
-    LIB_CEC->AddLog(CEC_LOG_DEBUG, "key pressed: %s (%1x, %d)", ToString(transmitKey.keycode), transmitKey.keycode, transmitKey.duration);
+    LIB_CEC->AddLog(CEC_LOG_DEBUG, "key pressed: %s (%1x)", ToString(transmitKey.keycode), transmitKey.keycode);
     QueueAddKey(transmitKey);
   }
 }
@@ -1112,82 +1055,38 @@ void CCECClient::SetCurrentButton(const cec_user_control_code iButtonCode)
   key.duration = 0;
   key.keycode = iButtonCode;
 
-  LIB_CEC->AddLog(CEC_LOG_DEBUG, "SetCurrentButton %s (%1x) D:%dms cur:%lx", ToString(key.keycode), key.keycode, key.duration);
   AddKey(key);
 }
 
-uint16_t CCECClient::CheckKeypressTimeout(void)
+void CCECClient::CheckKeypressTimeout(void)
 {
-  // time when we'd like to be called again
-  uint64_t timeout = CEC_PROCESSOR_SIGNAL_WAIT_TIME;
   cec_keypress key;
-  key.keycode = CEC_USER_CONTROL_CODE_UNKNOWN;
   key.duration = 0;
 
-  if (m_iCurrentButton == CEC_USER_CONTROL_CODE_UNKNOWN)
-	  return (uint16_t)timeout;
   {
     CLockObject lock(m_mutex);
     uint64_t iNow = GetTimeMs();
-    LIB_CEC->AddLog(CEC_LOG_DEBUG, "%s T:%.3f", __FUNCTION__, iNow*1e-3);
     cec_user_control_code comboKey(m_configuration.comboKey);
     uint32_t iTimeoutMs(m_configuration.iComboKeyTimeoutMs);
 
-    if (m_iCurrentButton == comboKey && iTimeoutMs > 0 && iNow - m_updateButtontime >= iTimeoutMs)
+    if (m_iCurrentButton != CEC_USER_CONTROL_CODE_UNKNOWN &&
+          ((m_iCurrentButton == comboKey && iTimeoutMs > 0 && iNow - m_buttontime > iTimeoutMs) ||
+          (m_iCurrentButton != comboKey && iNow - m_buttontime > CEC_BUTTON_TIMEOUT)))
     {
-      key.duration = (unsigned int) (iNow - m_initialButtontime);
+      key.duration = (unsigned int) (iNow - m_buttontime);
       key.keycode = m_iCurrentButton;
 
       m_iCurrentButton = CEC_USER_CONTROL_CODE_UNKNOWN;
-      m_initialButtontime = 0;
-      m_updateButtontime = 0;
-      m_repeatButtontime = 0;
-      m_releaseButtontime = 0;
-      m_pressedButtoncount = 0;
-      m_releasedButtoncount = 0;
-    }
-    else if (m_iCurrentButton != comboKey && m_releaseButtontime && iNow >= (uint64_t)m_releaseButtontime)
-    {
-      key.duration = (unsigned int) (iNow - m_initialButtontime);
-      key.keycode = CEC_USER_CONTROL_CODE_UNKNOWN;
-
-      m_iCurrentButton = CEC_USER_CONTROL_CODE_UNKNOWN;
-      m_initialButtontime = 0;
-      m_updateButtontime = 0;
-      m_repeatButtontime = 0;
-      m_releaseButtontime = 0;
-      m_pressedButtoncount = 0;
-      m_releasedButtoncount = 0;
-    }
-    else if (m_iCurrentButton != comboKey && m_repeatButtontime && iNow >= (uint64_t)m_repeatButtontime)
-    {
-      key.duration = (unsigned int) (iNow - m_initialButtontime);
-      key.keycode = m_iCurrentButton;
-      m_repeatButtontime = iNow + m_configuration.iButtonRepeatRateMs;
-      timeout = std::min((uint64_t)timeout, m_repeatButtontime - iNow);
+      m_buttontime = 0;
     }
     else
     {
-      if (m_iCurrentButton == comboKey && iTimeoutMs > 0)
-        timeout = std::min((uint64_t)timeout, m_updateButtontime - iNow + iTimeoutMs);
-      if (m_iCurrentButton != comboKey && m_releaseButtontime)
-        timeout = std::min((uint64_t)timeout, m_releaseButtontime - iNow);
-      if (m_iCurrentButton != comboKey && m_repeatButtontime)
-        timeout = std::min((uint64_t)timeout, m_repeatButtontime - iNow);
-      if (timeout > CEC_PROCESSOR_SIGNAL_WAIT_TIME)
-      {
-        LIB_CEC->AddLog(CEC_LOG_ERROR, "Unexpected timeout: %d (%.3f %.3f %.3f) k:%02x", timeout, iNow*1e-3, m_updateButtontime*1e-3, m_releaseButtontime*1e-3, m_iCurrentButton);
-        timeout = CEC_PROCESSOR_SIGNAL_WAIT_TIME;
-      }
+      return;
     }
-    LIB_CEC->AddLog(CEC_LOG_DEBUG, "Key %s: %s (duration:%d) (%1x) timeout:%dms (rel:%d,rep:%d,prs:%d,rel:%d)", ToString(m_iCurrentButton), key.keycode == CEC_USER_CONTROL_CODE_UNKNOWN ? "idle" : m_repeatButtontime ? "repeated" : "released", key.duration,
-        m_iCurrentButton, timeout, (int)(m_releaseButtontime ? m_releaseButtontime - iNow : 0), (int)(m_repeatButtontime ? m_repeatButtontime - iNow : 0), m_pressedButtoncount, m_releasedButtoncount);
   }
 
-  if (key.keycode != CEC_USER_CONTROL_CODE_UNKNOWN)
-    QueueAddKey(key);
-
-  return (uint16_t)timeout;
+  LIB_CEC->AddLog(CEC_LOG_DEBUG, "key auto-released: %s (%1x)", ToString(key.keycode), key.keycode);  
+  QueueAddKey(key);
 }
 
 bool CCECClient::EnableCallbacks(void *cbParam, ICECCallbacks *callbacks)
@@ -1650,7 +1549,20 @@ void CCECClient::CallbackAddKey(const cec_keypress &key)
 {
   CLockObject lock(m_cbMutex);
   if (m_configuration.callbacks && !!m_configuration.callbacks->keyPress)
+  {
+    // prevent double taps
+    int64_t now = GetTimeMs();
+    if (m_lastKeypress.keycode != key.keycode ||
+        key.duration > 0 ||
+        now - m_iLastKeypressTime >= DoubleTapTimeoutMS())
+    {
+      // no double tap
+      if (key.duration == 0)
+        m_iLastKeypressTime = now;
+      m_lastKeypress = key;
       m_configuration.callbacks->keyPress(m_configuration.callbackParam, &key);
+    }
+  }
 }
 
 void CCECClient::CallbackAddLog(const cec_log_message_cpp &message)
