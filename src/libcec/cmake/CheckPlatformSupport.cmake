@@ -21,6 +21,7 @@ set(RPI_INCLUDE_DIR "" CACHE STRING "Path to Raspberry Pi headers")
 set(PLATFORM_LIBREQUIRES "")
 
 include(CheckFunctionExists)
+include(CheckSymbolExists)
 include(FindPkgConfig)
 
 # defaults
@@ -42,6 +43,7 @@ if(WIN32)
   # Windows
   add_definitions(-DTARGET_WINDOWS -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_WINSOCKAPI_)
   set(LIB_DESTINATION ".")
+  check_symbol_exists(_X64_ Windows.h WIN64)
   if (${WIN64})
     set(LIB_INFO "${LIB_INFO} (x64)")
   else()
@@ -187,20 +189,36 @@ else()
     swig_link_libraries(cec ${PYTHON_LIBRARIES})
     swig_link_libraries(cec cec)
 
+    SET(PYTHON_LIB_INSTALL_PATH "/cec" CACHE STRING "python lib path")
+    if (${CMAKE_MAJOR_VERSION} GREATER 2 AND ${CMAKE_MAJOR_VERSION} GREATER_EQUAL 7)
+	  SET(PYTHON_LIB_INSTALL_PATH "" CACHE STRING "python lib path" FORCE)
+    else()
+      if (${CMAKE_MAJOR_VERSION} GREATER_EQUAL 3)
+        SET(PYTHON_LIB_INSTALL_PATH "" CACHE STRING "python lib path" FORCE)
+      endif()
+    endif()
+
     if(WIN32)
       install(TARGETS     ${SWIG_MODULE_cec_REAL_NAME}
-              DESTINATION python/cec)
+              DESTINATION python/${PYTHON_LIB_INSTALL_PATH})
       install(FILES       ${CMAKE_BINARY_DIR}/src/libcec/cec.py
               DESTINATION python/cec
               RENAME      __init__.py)
     else()
-      if(EXISTS "/etc/lsb-release")
-        SET(PYTHON_PKG_DIR "dist-packages")
-      else()
+      if(EXISTS "/etc/os-release")
+        file(READ "/etc/os-release" OS_RELEASE)
+        string(REGEX MATCH "ID(_LIKE)?=debian" IS_DEBIAN ${OS_RELEASE})
+        if (IS_DEBIAN)
+          SET(PYTHON_PKG_DIR "dist-packages")
+        endif()
+      endif()
+
+      if (NOT PYTHON_PKG_DIR)
         SET(PYTHON_PKG_DIR "site-packages")
       endif()
+
       install(TARGETS     ${SWIG_MODULE_cec_REAL_NAME}
-              DESTINATION lib/python${PYTHON_VERSION}/${PYTHON_PKG_DIR}/cec)
+              DESTINATION lib/python${PYTHON_VERSION}/${PYTHON_PKG_DIR}/${PYTHON_LIB_INSTALL_PATH})
       install(FILES       ${CMAKE_BINARY_DIR}/src/libcec/cec.py
               DESTINATION lib/python${PYTHON_VERSION}/${PYTHON_PKG_DIR}/cec
               RENAME      __init__.py)
